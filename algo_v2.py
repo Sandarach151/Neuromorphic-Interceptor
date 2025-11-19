@@ -12,15 +12,12 @@ MAX_SENSOR_X = 639
 MAX_SENSOR_Y = 479
 
 recording = False
+buffered_events = []   # store (x, y, t)
 
 cam = Camera.from_first_available()
 slicer = CameraStreamSlicer(cam.move(), SliceCondition.make_n_us(BATCH_US))
 
 batch = 0
-events_file = f"events/filtered_events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-with open(events_file, "w") as f:
-    f.write("x_bin,y_bin,batch_start_t\n")
 
 def downsample_to_grid(xs, ys):
     """Map sensor coordinates to 100x100 grid."""
@@ -31,19 +28,29 @@ def downsample_to_grid(xs, ys):
         np.clip(y_bins, 0, PIXEL_Y - 1)
     )
 
-# Precompute masks so this is O(1) at runtime
 green_mask = np.zeros((PIXEL_X, PIXEL_Y), dtype=bool)
 red_mask   = np.zeros((PIXEL_X, PIXEL_Y), dtype=bool)
 
-# --- GREEN REGIONS ---
-green_mask[0:2, :] = True                     # first 2 columns
-green_mask[:, 99][0:50] = True                # top row, left half
-green_mask[:, 0][0:50] = True                 # bottom row, left half
+green_mask[0:2, :] = True
+green_mask[:, 99][0:50] = True
+green_mask[:, 0][0:50]  = True
 
-# --- RED REGIONS ---
-red_mask[98:100, :] = True                    # last 2 columns
-red_mask[:, 99][50:100] = True                # top row, right half
-red_mask[:, 0][50:100] = True                 # bottom row, right half
+red_mask[98:100, :] = True
+red_mask[:, 99][50:100] = True
+red_mask[:, 0][50:100]  = True
+
+def fit_line(times, values):
+    """
+    Linear regression: values ≈ a * t + b
+    Returns (a, b).
+    """
+    # center for numerical stability
+    t0 = times[0]
+    t = times - t0
+
+    A = np.vstack([t, np.ones_like(t)]).T
+    a, b = np.linalg.lstsq(A, values, rcond=None)[0]
+    return a, b - a * t0   # uncenter b
 
 print("Get Ready...")
 time.sleep(1)
@@ -71,26 +78,54 @@ for sl in slicer:
     grid = np.zeros((PIXEL_X, PIXEL_Y), dtype=np.uint16)
     np.add.at(grid, (x_bins, y_bins), 1)
 
-    # Check triggers
     green_triggered = np.any(grid[green_mask] >= EVENT_THRESHOLD)
     red_triggered   = np.any(grid[red_mask]   >= EVENT_THRESHOLD)
 
-    # Recording state machine
     if green_triggered and not recording:
         print(">>> START RECORDING")
         recording = True
+        buffered_events = []  # reset buffer
 
     if red_triggered and recording:
         print(">>> STOP RECORDING")
         recording = False
 
-    # If we are not recording, continue
+        if len(buffered_events) > 0:
+            arr = np.array(buffered_events)  # (N, 3) → x, y, t
+
+            xs = arr[:,0]
+            ys = arr[:,1]
+            ts = arr[:,2]
+
+            # Fit x(t) and y(t)
+            ax, bx = fit_line(ts, xs)
+            ay, by = fit_line(ts, ys)
+
+            print(f"\n=== Best-fit trajectories ===")
+            print(f"x(t) = {ax:.6f} * t + {bx:.6f}")
+            print(f"y(t) = {ay:.6f} * t + {by:.6f}")
+            print("=============================\n")
+
+            # Save to CSV
+            out_file = f"events/recording_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            np.savetxt(out_file, arr, fmt='%d', delimiter=',', header="x,y,t", comments="")
+            print(f"Saved recording to {out_file}")
+
+        # Clear for next run
+        buffered_events = []
+        continue
+
+    # If not recording, skip
     if not recording:
         continue
 
-    # Save active pixels
     xs, ys = np.where(grid >= EVENT_THRESHOLD)
     if xs.size > 0:
-        results = np.column_stack((xs, ys, np.full(xs.shape, batch_start_t)))
-        with open(events_file, "a") as f:
-            np.savetxt(f, results, fmt='%d', delimiter=',')
+        ts = np.full(xs.shape, batch_start_t, dtype=np.int64)
+        buffered_events.append(np.column_stack((xs, ys, ts)))
+        # Flatten nested array
+        if isinstance(buffered_events[-1], np.ndarray) and buffered_events[-1].ndim == 2:
+            buffered_events[-1] = buffered_events[-1].reshape(-1, 3)
+        # Convert list of arrays to single array lazily
+        buffered_events = list(buffered_events)
+        buffered_events[-1] = np.array(buffered_events[-1]).reshape(-1,3)
