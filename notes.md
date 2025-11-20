@@ -3,4 +3,6 @@
 3. metavision_platform_info
 4. metavision_viewer
 5. cmake --build . -j"$(nproc)"
-6. Check prophesee docs to do noise cancellation automatically if needed in future
+6. Check prophesee docs to do noise cancellation automatically if needed in 
+7. wifi connection - sudo nmtui
+future
