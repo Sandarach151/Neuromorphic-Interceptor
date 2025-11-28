@@ -3,27 +3,26 @@ from metavision_sdk_stream import Camera, CameraStreamSlicer, SliceCondition
 import os
 from datetime import datetime
 import time
+import serial
+from turret import Turret
 
 PIXEL_X = 100
 PIXEL_Y = 100
 EVENT_THRESHOLD = 10
 BATCH_US = 10_000
-MAX_SENSOR_X = 639
-MAX_SENSOR_Y = 479
+MAX_SENSOR_X = 640
+MAX_SENSOR_Y = 480
 
 recording = False
+buffered_events = []
+t=Turret()
 
 cam = Camera.from_first_available()
 slicer = CameraStreamSlicer(cam.move(), SliceCondition.make_n_us(BATCH_US))
 
 batch = 0
-events_file = f"events/filtered_events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-with open(events_file, "w") as f:
-    f.write("x_bin,y_bin,batch_start_t\n")
 
 def downsample_to_grid(xs, ys):
-    """Map sensor coordinates to 100x100 grid."""
     x_bins = (xs.astype(np.float32) / MAX_SENSOR_X * PIXEL_X).astype(np.int32)
     y_bins = (ys.astype(np.float32) / MAX_SENSOR_Y * PIXEL_Y).astype(np.int32)
     return (
@@ -31,22 +30,34 @@ def downsample_to_grid(xs, ys):
         np.clip(y_bins, 0, PIXEL_Y - 1)
     )
 
-# Precompute masks so this is O(1) at runtime
 green_mask = np.zeros((PIXEL_X, PIXEL_Y), dtype=bool)
 red_mask   = np.zeros((PIXEL_X, PIXEL_Y), dtype=bool)
 
-# --- GREEN REGIONS ---
-green_mask[0:2, :] = True                     # first 2 columns
-green_mask[:, 99][0:50] = True                # top row, left half
-green_mask[:, 0][0:50] = True                 # bottom row, left half
+green_mask[0:2, :] = True
+green_mask[:, 99][0:50] = True
+green_mask[:, 0][0:50]  = True
 
-# --- RED REGIONS ---
-red_mask[98:100, :] = True                    # last 2 columns
-red_mask[:, 99][50:100] = True                # top row, right half
-red_mask[:, 0][50:100] = True                 # bottom row, right half
+red_mask[98:100, :] = True
+red_mask[:, 99][50:100] = True
+red_mask[:, 0][50:100]  = True
+
+def fit_line(times, values):
+    t0 = times[0]
+    t = times - t0
+
+    A = np.vstack([t, np.ones_like(t)]).T
+    a, b = np.linalg.lstsq(A, values, rcond=None)[0]
+    
+    # Calculate R^2
+    y_pred = a * t + b
+    ss_res = np.sum((values - y_pred) ** 2)
+    ss_tot = np.sum((values - np.mean(values)) ** 2)
+    r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+    
+    return a, b - a * t0, r2
 
 print("Get Ready...")
-time.sleep(1)
+time.sleep(10)
 print("Reading Events...")
 
 for sl in slicer:
@@ -54,7 +65,7 @@ for sl in slicer:
     if evs is None or evs.size == 0:
         continue
 
-    # Normalise dtype if needed
+    # Normalize dtype
     if evs.dtype.names != ('t','x','y','p'):
         evs = np.rec.fromarrays(
             [evs['t'], evs['x'], evs['y'], evs['p']],
@@ -64,33 +75,55 @@ for sl in slicer:
     batch += 1
     batch_start_t = int(evs['t'][0])
 
-    # Downsample
     x_bins, y_bins = downsample_to_grid(evs['x'], evs['y'])
 
-    # Build grid counts
     grid = np.zeros((PIXEL_X, PIXEL_Y), dtype=np.uint16)
     np.add.at(grid, (x_bins, y_bins), 1)
 
-    # Check triggers
     green_triggered = np.any(grid[green_mask] >= EVENT_THRESHOLD)
     red_triggered   = np.any(grid[red_mask]   >= EVENT_THRESHOLD)
 
-    # Recording state machine
+    # --- START ---
     if green_triggered and not recording:
         print(">>> START RECORDING")
         recording = True
+        buffered_events = []
 
+    # --- STOP ---
     if red_triggered and recording:
         print(">>> STOP RECORDING")
         recording = False
+        # print(f"Recording stopped at: {datetime.now().isoformat(timespec='microseconds')}")
+        if len(buffered_events) > 0:
+            # FIXED: merge the list of (N_i, 3) arrays
+            arr = np.vstack(buffered_events)  # <-- correct way
 
-    # If we are not recording, continue
+            xs = arr[:,0]
+            ys = arr[:,1]
+            ts = arr[:,2]
+
+            mx, cx, r2_x = fit_line(ts, xs)
+            my, cy, r2_y = fit_line(ts, ys)
+            speed = (mx*mx+my*my) ** 0.5 * 1.23 * 10000
+            print(f"X position: {mx:.5f}t+{cx:.5f} (R²={r2_x:.5f})")
+            print(f"Y position: {my:.5f}t+{cy:.5f} (R²={r2_y:.5f})")
+            print(f"Speed: {speed:.5f}m/s")
+            t.pitch(135)
+            time.sleep(0.15)
+            t.trigger(60)
+            time.sleep(1)
+            t.trigger(110)
+            break
+
+        buffered_events = []
+        continue
+
     if not recording:
         continue
 
-    # Save active pixels
+    # Store events for this batch
     xs, ys = np.where(grid >= EVENT_THRESHOLD)
     if xs.size > 0:
-        results = np.column_stack((xs, ys, np.full(xs.shape, batch_start_t)))
-        with open(events_file, "a") as f:
-            np.savetxt(f, results, fmt='%d', delimiter=',')
+        ts = np.full(xs.shape, batch_start_t, dtype=np.int64)
+        batch_arr = np.column_stack((xs, ys, ts))  # shape (N,3)
+        buffered_events.append(batch_arr)
