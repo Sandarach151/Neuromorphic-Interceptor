@@ -1,4 +1,5 @@
 import serial
+import time
 
 class Turret:
     def __init__(self, port="/dev/ttyUSB0", baud=115200):
@@ -22,3 +23,10 @@ class Turret:
     def fire(self, pitch_angle: int, yaw_angle: int, t_fire_cam: int):
         return self.send(f"FIRE {pitch_angle} {yaw_angle} {t_fire_cam}")
 
+t = Turret()
+t.pitch(120)
+t.yaw(120)
+t.trigger(60)
+time.sleep(1)
+t.pitch(90)
+t.yaw(90)

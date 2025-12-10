@@ -6,12 +6,24 @@ import time
 import serial
 from turret import Turret
 
+# Measured Values
+X_AC = 90.0
+Y_AC = 8.0
+Z_AC = 30.0
+V_AC = 12e-4
+FOV_X = 216
+
+# Values to Calibrate
+SYNC_DELAY = 0
+TRIGGER_DELAY = 0
+
 PIXEL_X = 160
 PIXEL_Y = 120
 EVENT_THRESHOLD = 20
 BATCH_US = 10_000
 MAX_SENSOR_X = 640
 MAX_SENSOR_Y = 480
+G = 9.78e-10 #cm/us^2
 
 recording = False
 synced = False
@@ -37,20 +49,26 @@ def downsample_to_grid(xs, ys):
     y_bins = (ys.astype(np.float32) / MAX_SENSOR_Y * PIXEL_Y).astype(np.int32)
     return (x_bins, y_bins)
 
-def fit_line(times, values):
-    t0 = times[0]
-    t = times - t0
+def fit_projectile(xs, ys, ts):
+    xs = np.asarray(xs, dtype=np.float64)
+    ys = np.asarray(ys, dtype=np.float64)
+    ts = np.asarray(ts, dtype=np.float64)
 
+    cm_per_px = FOV_X / PIXEL_X
+    x_cm = xs * cm_per_px
+    y_cm = ys * cm_per_px
+
+    t_min = ts.min()
+    t = ts - t_min
     A = np.vstack([t, np.ones_like(t)]).T
-    a, b = np.linalg.lstsq(A, values, rcond=None)[0]
-    
-    # Calculate R^2
-    y_pred = a * t + b
-    ss_res = np.sum((values - y_pred) ** 2)
-    ss_tot = np.sum((values - np.mean(values)) ** 2)
-    r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
-    
-    return a, b - a * t0, r2
+    v_x, x0 = np.linalg.lstsq(A, x_cm, rcond=None)[0]
+
+    y_corr = y_cm + 0.5 * (G * t) * t
+    v_y, y0 = np.linalg.lstsq(A, y_corr, rcond=None)[0]
+
+    # x = x0 + v_x(t-t_min)
+    # y = y0 + v_y(t-t_min) - 0.5G(t-t_min)^2
+    return x0, v_x, y0, v_y, t_min
 
 print("Get Ready...")
 time.sleep(0)
@@ -69,7 +87,7 @@ for sl in slicer:
 
     if not synced:
         batch_end_t = int(evs['t'][-1])
-        t.sync(batch_end_t, 0)
+        t.sync(batch_end_t, SYNC_DELAY)
         synced = True
     
     x_bins, y_bins = downsample_to_grid(evs['x'], evs['y'])
@@ -95,14 +113,18 @@ for sl in slicer:
             ys = arr[:,1]
             ts = arr[:,2]
 
-            mx, cx, r2_x = fit_line(ts, xs)
-            my, cy, r2_y = fit_line(ts, ys)
+            x_0, v_x, y_0, v_y, t_min = fit_projectile(xs, ys, ts)
 
+            t_pred = ((np.float64(X_AC) - x_0) / v_x) + t_min
+            y_pred = y_0 + v_y * (t_pred - t_min) - 0.5 * G * (t_pred - t_min) ** 2
+            y_delta = y_pred - Y_AC
+            theta_pitch = np.degrees(np.arctan(y_delta / Z_AC)) + 90
+            t_fire = t_pred - TRIGGER_DELAY - np.sqrt(y_delta**2 + Z_AC**2) / V_AC
+            t.fire(theta_pitch, 90, t_fire)
             # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             # filename = f"events/events_{timestamp}.npy"
             # np.save(filename, arr)
             # print(f"Saved {len(arr)} events to {filename}")
-            
             break
 
         buffered_events = []

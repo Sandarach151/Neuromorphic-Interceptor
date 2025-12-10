@@ -37,22 +37,22 @@ void loop() {
 
       int pitch = cmd.substring(firstSpace + 1, secondSpace).toInt();
       int yaw   = cmd.substring(secondSpace + 1, thirdSpace).toInt();
-      unsigned long T_cam = cmd.substring(thirdSpace + 1).toInt();
+      unsigned long T_cam = cmd.substring(thirdSpace + 1).toULong();
 
       // Convert camera time → Arduino time
       unsigned long T_arduino = T_cam - offset;
 
       // Move servos first
-      pitchServo.write(pitch);
-      yawServo.write(yaw);
+      pit.write(pitch);
+      yaw.write(yaw);
 
-      while ((long)(micros() - T_arduino) > 0) {
+      while ((long)(micros() - T_arduino) < 0) {
         // busy wait for highest precision
       }
 
-      triggerServo.write(60);
+      trg.write(60);
       delayMicroseconds(1000000); // adjust as needed
-      triggerServo.write(110);
+      trg.write(110);
     }
     else if (cmd.startsWith("trigger ")) {
       int v = cmd.substring(8).toInt();
