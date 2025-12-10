@@ -8,7 +8,7 @@ from turret import Turret
 
 PIXEL_X = 160
 PIXEL_Y = 120
-EVENT_THRESHOLD = 10
+EVENT_THRESHOLD = 20
 BATCH_US = 10_000
 MAX_SENSOR_X = 640
 MAX_SENSOR_Y = 480
@@ -53,7 +53,7 @@ def fit_line(times, values):
     return a, b - a * t0, r2
 
 print("Get Ready...")
-time.sleep(10)
+time.sleep(0)
 print("Reading Events...")
 
 for sl in slicer:
@@ -89,19 +89,19 @@ for sl in slicer:
         recording = False
         # print(f"Recording stopped at: {datetime.now().isoformat(timespec='microseconds')}")
         if len(buffered_events) > 0:
-            arr = np.vstack(buffered_events)  # <-- correct way
+            arr = np.vstack(buffered_events)
 
-            # xs = arr[:,0]
-            # ys = arr[:,1]
-            # ts = arr[:,2]
+            xs = arr[:,0]
+            ys = arr[:,1]
+            ts = arr[:,2]
 
-            # mx, cx, r2_x = fit_line(ts, xs)
-            # my, cy, r2_y = fit_line(ts, ys)
+            mx, cx, r2_x = fit_line(ts, xs)
+            my, cy, r2_y = fit_line(ts, ys)
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"events/events_{timestamp}.npy"
-            np.save(filename, arr)
-            print(f"Saved {len(arr)} events to {filename}")
+            # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # filename = f"events/events_{timestamp}.npy"
+            # np.save(filename, arr)
+            # print(f"Saved {len(arr)} events to {filename}")
             
             break
 
