@@ -24,8 +24,8 @@ void loop() {
       // SYNC <cam_t> <delay>
       int s1 = cmd.indexOf(' ');
       int s2 = cmd.indexOf(' ', s1 + 1);
-      unsigned long cam_t = cmd.substring(s1 + 1, s2).toULong();
-    	unsigned long delay = cmd.substring(s2 + 1).toULong();
+      unsigned long cam_t = strtoul(cmd.substring(s1 + 1, s2).c_str(), NULL, 10);
+      unsigned long delay = strtoul(cmd.substring(s2 + 1).c_str(), NULL, 10);
       unsigned long ar_t  = micros();
       offset = (cam_t + delay) - ar_t;
     }
@@ -37,7 +37,7 @@ void loop() {
 
       int pitch = cmd.substring(firstSpace + 1, secondSpace).toInt();
       int yaw   = cmd.substring(secondSpace + 1, thirdSpace).toInt();
-      unsigned long T_cam = cmd.substring(thirdSpace + 1).toULong();
+      unsigned long T_cam = strtoul(cmd.substring(thirdSpace + 1).c_str(), NULL, 10);
 
       // Convert camera time → Arduino time
       unsigned long T_arduino = T_cam - offset;

@@ -7,11 +7,12 @@ import serial
 from turret import Turret
 
 # Measured Values
-X_AC = 90.0
-Y_AC = 8.0
-Z_AC = 30.0
+X_AC = 400.0
+Y_AC = 20.0
+Z_AC = 200.0
 V_AC = 12e-4
 FOV_X = 216
+TIME_DELAY = 5
 
 # Values to Calibrate
 SYNC_DELAY = 0
@@ -71,7 +72,7 @@ def fit_projectile(xs, ys, ts):
     return x0, v_x, y0, v_y, t_min
 
 print("Get Ready...")
-time.sleep(0)
+time.sleep(TIME_DELAY)
 print("Reading Events...")
 
 for sl in slicer:
@@ -121,13 +122,17 @@ for sl in slicer:
             theta_pitch = np.degrees(np.arctan(y_delta / Z_AC)) + 90
             t_fire = t_pred - TRIGGER_DELAY - np.sqrt(y_delta**2 + Z_AC**2) / V_AC
             t.fire(theta_pitch, 90, t_fire)
-            # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # filename = f"events/events_{timestamp}.npy"
-            # np.save(filename, arr)
-            # print(f"Saved {len(arr)} events to {filename}")
+            # print(t_fire - t_min)
+            # print(t_pred - t_min)
+            # print(y_pred)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"events/events_{timestamp}.npy"
+            np.save(filename, arr)
+            print(f"Saved {len(arr)} events to {filename}")
             break
 
         buffered_events = []
+        exit()
         continue
 
     if not recording:
