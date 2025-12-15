@@ -26,11 +26,4 @@ class Turret:
         return self.send(f"FIRE {pitch_angle} {yaw_angle} {t_fire_cam}")
 
 t = Turret()
-t.pitch(120)
-t.yaw(120)
-time.sleep(0.5)
-t.trigger(60)
-time.sleep(1)
-t.pitch(90)
-t.yaw(90)
-t.trigger(110)
+t.pitch(130)

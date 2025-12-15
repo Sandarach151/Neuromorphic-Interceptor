@@ -7,24 +7,24 @@ import serial
 from turret import Turret
 
 # Measured Values
-X_AC = 400.0
-Y_AC = 20.0
-Z_AC = 200.0
-V_AC = 12e-4
-FOV_X = 216
+X_AC = 624
+Y_AC = 37
+Z_AC = 158.0
+V_AC = 9.4e-4
+FOV_X = 192
 TIME_DELAY = 0
 
 # Values to Calibrate
 SYNC_DELAY = 0
-TRIGGER_DELAY = 0
+TRIGGER_DELAY = 180000
 
 PIXEL_X = 160
 PIXEL_Y = 120
-EVENT_THRESHOLD = 20
+EVENT_THRESHOLD = 50
 BATCH_US = 10_000
 MAX_SENSOR_X = 640
 MAX_SENSOR_Y = 480
-G = 9.78e-10 #cm/us^2
+G = 1.78e-10 #cm/us^2
 
 recording = False
 synced = False
@@ -86,8 +86,6 @@ for sl in slicer:
             dtype=[('t','<u8'),('x','<u2'),('y','<u2'),('p','u1')]
         )
 
-    evs['x'] = MAX_SENSOR_X - evs['x'] - 1
-    evs['y'] = MAX_SENSOR_Y - evs['y'] - 1
 
     if not synced:
         batch_end_t = int(evs['t'][-1])
@@ -128,11 +126,11 @@ for sl in slicer:
             print(t_fire - t_min)
             print(t_pred - t_min)
             print(y_pred)
+            print(x_0, v_x, y_0, v_y, sep=',')
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"events/events_{timestamp}.npy"
             np.save(filename, arr)
             print(f"Saved {len(arr)} events to {filename}")
-            break
 
         buffered_events = []
         continue
