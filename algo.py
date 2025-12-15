@@ -12,7 +12,7 @@ Y_AC = 20.0
 Z_AC = 200.0
 V_AC = 12e-4
 FOV_X = 216
-TIME_DELAY = 5
+TIME_DELAY = 0
 
 # Values to Calibrate
 SYNC_DELAY = 0
@@ -86,6 +86,9 @@ for sl in slicer:
             dtype=[('t','<u8'),('x','<u2'),('y','<u2'),('p','u1')]
         )
 
+    evs['x'] = MAX_SENSOR_X - evs['x'] - 1
+    evs['y'] = MAX_SENSOR_Y - evs['y'] - 1
+
     if not synced:
         batch_end_t = int(evs['t'][-1])
         t.sync(batch_end_t, SYNC_DELAY)
@@ -122,9 +125,9 @@ for sl in slicer:
             theta_pitch = np.degrees(np.arctan(y_delta / Z_AC)) + 90
             t_fire = t_pred - TRIGGER_DELAY - np.sqrt(y_delta**2 + Z_AC**2) / V_AC
             t.fire(theta_pitch, 90, t_fire)
-            # print(t_fire - t_min)
-            # print(t_pred - t_min)
-            # print(y_pred)
+            print(t_fire - t_min)
+            print(t_pred - t_min)
+            print(y_pred)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"events/events_{timestamp}.npy"
             np.save(filename, arr)
@@ -132,7 +135,6 @@ for sl in slicer:
             break
 
         buffered_events = []
-        exit()
         continue
 
     if not recording:

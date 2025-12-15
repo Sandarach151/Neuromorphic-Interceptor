@@ -4,6 +4,8 @@ import time
 class Turret:
     def __init__(self, port="/dev/ttyUSB0", baud=115200):
         self.ser = serial.Serial(port, baud, timeout=1)
+        time.sleep(2.0)                 # allow Arduino reboot/bootloader to finish
+        self.ser.reset_input_buffer()
 
     def send(self, cmd: str):
         self.ser.write((cmd + "\n").encode())
@@ -23,12 +25,12 @@ class Turret:
     def fire(self, pitch_angle: int, yaw_angle: int, t_fire_cam: int):
         return self.send(f"FIRE {pitch_angle} {yaw_angle} {t_fire_cam}")
 
-# t = Turret()
-# t.pitch(120)
-# t.yaw(120)
-# time.sleep(0.5)
-# t.trigger(60)
-# time.sleep(1)
-# t.pitch(90)
-# t.yaw(90)
-# t.trigger(110)
+t = Turret()
+t.pitch(120)
+t.yaw(120)
+time.sleep(0.5)
+t.trigger(60)
+time.sleep(1)
+t.pitch(90)
+t.yaw(90)
+t.trigger(110)

@@ -35,16 +35,16 @@ void loop() {
       int secondSpace = cmd.indexOf(' ', firstSpace + 1);
       int thirdSpace = cmd.indexOf(' ', secondSpace + 1);
 
-      int pitch = cmd.substring(firstSpace + 1, secondSpace).toInt();
-      int yaw   = cmd.substring(secondSpace + 1, thirdSpace).toInt();
+      int pitch_angle = cmd.substring(firstSpace + 1, secondSpace).toInt();
+      int yaw_angle   = cmd.substring(secondSpace + 1, thirdSpace).toInt();
       unsigned long T_cam = strtoul(cmd.substring(thirdSpace + 1).c_str(), NULL, 10);
 
       // Convert camera time → Arduino time
       unsigned long T_arduino = T_cam - offset;
 
       // Move servos first
-      pit.write(pitch);
-      yaw.write(yaw);
+      pit.write(pitch_angle);
+      yaw.write(yaw_angle);
 
       while ((long)(micros() - T_arduino) < 0) {
         // busy wait for highest precision
