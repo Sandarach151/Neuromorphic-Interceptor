@@ -25,5 +25,3 @@ class Turret:
     def fire(self, pitch_angle: int, yaw_angle: int, t_fire_cam: int):
         return self.send(f"FIRE {pitch_angle} {yaw_angle} {t_fire_cam}")
 
-t = Turret()
-t.pitch(130)

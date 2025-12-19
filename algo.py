@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import time
 import serial
-from turret import Turret
+#from turret import Turret
 
 # Measured Values
 X_AC = 624
@@ -20,7 +20,7 @@ TRIGGER_DELAY = 180000
 
 PIXEL_X = 160
 PIXEL_Y = 120
-EVENT_THRESHOLD = 50
+EVENT_THRESHOLD = 20
 BATCH_US = 10_000
 MAX_SENSOR_X = 640
 MAX_SENSOR_Y = 480
@@ -29,7 +29,7 @@ G = 1.78e-10 #cm/us^2
 recording = False
 synced = False
 buffered_events = []
-t=Turret()
+#t=Turret()
 
 cam = Camera.from_first_available()
 slicer = CameraStreamSlicer(cam.move(), SliceCondition.make_n_us(BATCH_US))
@@ -89,7 +89,7 @@ for sl in slicer:
 
     if not synced:
         batch_end_t = int(evs['t'][-1])
-        t.sync(batch_end_t, SYNC_DELAY)
+        #t.sync(batch_end_t, SYNC_DELAY)
         synced = True
     
     x_bins, y_bins = downsample_to_grid(evs['x'], evs['y'])
@@ -116,16 +116,6 @@ for sl in slicer:
             ts = arr[:,2]
 
             x_0, v_x, y_0, v_y, t_min = fit_projectile(xs, ys, ts)
-
-            t_pred = ((np.float64(X_AC) - x_0) / v_x) + t_min
-            y_pred = y_0 + v_y * (t_pred - t_min) - 0.5 * G * (t_pred - t_min) ** 2
-            y_delta = y_pred - Y_AC
-            theta_pitch = np.degrees(np.arctan(y_delta / Z_AC)) + 90
-            t_fire = t_pred - TRIGGER_DELAY - np.sqrt(y_delta**2 + Z_AC**2) / V_AC
-            t.fire(theta_pitch, 90, t_fire)
-            print(t_fire - t_min)
-            print(t_pred - t_min)
-            print(y_pred)
             print(x_0, v_x, y_0, v_y, sep=',')
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"events/events_{timestamp}.npy"
@@ -143,9 +133,11 @@ for sl in slicer:
     event_mask   = active_cells[x_bins, y_bins]     # boolean mask over events
 
     if np.any(event_mask):
-        xs_evt = x_bins[event_mask]
-        ys_evt = y_bins[event_mask]
-        ts_evt = evs['t'][event_mask].astype(np.int64)
+        if np.any(event_mask):
+            xs_evt = evs['x'][event_mask]
+            ys_evt = evs['y'][event_mask]
+            ts_evt = evs['t'][event_mask].astype(np.int64)
 
-        batch_arr = np.column_stack((xs_evt, ys_evt, ts_evt))  # (N, 3)
-        buffered_events.append(batch_arr)
+            batch_arr = np.column_stack((xs_evt, ys_evt, ts_evt))  # (N, 3)
+            buffered_events.append(batch_arr)
+
