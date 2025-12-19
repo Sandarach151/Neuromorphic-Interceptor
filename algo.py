@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 import time
 import serial
-#from turret import Turret
+from turret import Turret
 
 # Measured Values
 X_AC = 624

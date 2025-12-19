@@ -5,28 +5,18 @@ import multiprocessing as mp
 from datetime import datetime
 from metavision_sdk_stream import Camera, CameraStreamSlicer, SliceCondition
 
-# Measured Values
-X_AC = 624
-Y_AC = 37
-Z_AC = 158.0
-V_AC = 9.4e-4
-FOV_X = 192
-TIME_DELAY = 0
-
-# Values to Calibrate
-SYNC_DELAY = 0
 TRIGGER_DELAY = 180000
 
+EVENT_THRESHOLD = 20
 PIXEL_X = 160
 PIXEL_Y = 120
-EVENT_THRESHOLD = 20
 BATCH_US = 10_000
 MAX_SENSOR_X = 640
 MAX_SENSOR_Y = 480
 G = 1.78e-10  # cm/us^2
 
-SERIAL_1 = "00001033"
-SERIAL_2 = "00000768"
+SERIAL_XY = "00001033"
+SERIAL_XZ = "00000768"
 
 def downsample_to_grid(xs, ys):
     x_bins = (xs.astype(np.float32) / MAX_SENSOR_X * PIXEL_X).astype(np.int32)
@@ -38,26 +28,19 @@ def fit_projectile(xs, ys, ts):
     ys = np.asarray(ys, dtype=np.float64)
     ts = np.asarray(ts, dtype=np.float64)
 
-    # IMPORTANT:
-    # We are storing full-res sensor pixels (0..MAX_SENSOR_X-1).
-    # So the physically consistent scale is:
-    cm_per_px = FOV_X / MAX_SENSOR_X
-    # If you want to match your old grid-based scaling exactly, use:
-    # cm_per_px = FOV_X / PIXEL_X
-
-    x_cm = xs * cm_per_px
-    y_cm = ys * cm_per_px
-
     t_min = ts.min()
     t = ts - t_min
 
-    A = np.vstack([t, np.ones_like(t)]).T
-    v_x, x0 = np.linalg.lstsq(A, x_cm, rcond=None)[0]
+    # Quadratic regression: y = a*t^2 + b*t + c
+    A = np.vstack([t**2, t, np.ones_like(t)]).T
+    
+    # Fit x(t) = a_x*t^2 + b_x*t + c_x
+    a_x, b_x, c_x = np.linalg.lstsq(A, xs, rcond=None)[0]
+    
+    # Fit y(t) = a_y*t^2 + b_y*t + c_y
+    a_y, b_y, c_y = np.linalg.lstsq(A, ys, rcond=None)[0]
 
-    y_corr = y_cm + 0.5 * (G * t) * t
-    v_y, y0 = np.linalg.lstsq(A, y_corr, rcond=None)[0]
-
-    return x0, v_x, y0, v_y, t_min
+    return (a_x, b_x, c_x), (a_y, b_y, c_y), t_min
 
 def build_masks():
     green_mask = np.zeros((PIXEL_X, PIXEL_Y), dtype=bool)
@@ -107,29 +90,27 @@ def camera_worker(serial, result_q):
                 ys = arr[:, 1]
                 ts = arr[:, 2]
 
-                x0, vx, y0, vy, t_min = fit_projectile(xs, ys, ts)
-
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(f"events/{serial}_events_{timestamp}.npy")
-                np.save(filename, arr)
+                (a_x, b_x, c_x), (a_y, b_y, c_y), t_min = fit_projectile(xs, ys, ts)
+                t_max = ts.max()
 
                 result_q.put({
                     "type": "trajectory",
-                    "cam": serial,
-                    "x0": float(x0),
-                    "vx": float(vx),
-                    "y0": float(y0),
-                    "vy": float(vy),
+                    "serial": serial,
+                    "c_x": float(c_x),
+                    "b_x": float(b_x),
+                    "c_y": float(c_y),
+                    "b_y": float(b_y),
+                    "a_x": float(a_x),
+                    "a_y": float(a_y),
                     "t_min": float(t_min),
+                    "t_max": float(t_max),
                     "n_events": int(arr.shape[0]),
                     "file": filename
                 })
-            else:
-                result_q.put({
-                    "type": "trajectory",
-                    "cam": serial,
-                    "error": "No buffered events"
-                })
+
+                timestamp = datetime.now().strftime("%d_%H%M%S")
+                filename = os.path.join(f"events/{serial}_events_{timestamp}.npy")
+                np.save(filename, arr)
 
             buffered_events = []
             continue
@@ -149,44 +130,33 @@ def camera_worker(serial, result_q):
             batch_arr = np.column_stack((xs_evt, ys_evt, ts_evt))
             buffered_events.append(batch_arr)
 
-
-def print_msg(msg):
-    if msg.get("type") == "status":
-        print(f"[{msg['cam']}] {msg['msg']} @ t={msg['t']}")
-
-    elif msg.get("type") == "trajectory":
-        if "error" in msg:
-            print(f"[{msg['cam']}] Trajectory ERROR: {msg['error']}")
-        else:
-            print(
-                f"[{msg['cam']}] Trajectory: "
-                f"x0={msg['x0']:.6f}, vx={msg['vx']:.6f}, "
-                f"y0={msg['y0']:.6f}, vy={msg['vy']:.6f}, "
-                f"t_min={msg['t_min']:.0f} us, "
-                f"events={msg['n_events']}, file={msg['file']}"
-            )
-
-    elif msg.get("type") == "error":
-        print(f"[{msg['cam']}] WORKER ERROR: {msg['error']}")
-
-    else:
-        print("MSG:", msg)
-
 if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
     result_q = mp.Queue()
 
-    p1 = mp.Process(target=camera_worker, args=(SERIAL_1, result_q))
-    p2 = mp.Process(target=camera_worker, args=(SERIAL_2, result_q))
+    pxy = mp.Process(target=camera_worker, args=(SERIAL_XY, result_q))
+    pxz = mp.Process(target=camera_worker, args=(SERIAL_XZ, result_q))
 
     print("Starting dual-camera capture in separate processes...")
-    p1.start()
-    p2.start()
+    pxy.start()
+    pxz.start()
 
     try:
-        while True:
+        resultXY = None
+        resultXZ = None
+        while not (resultXY and resultXZ):
             msg = result_q.get()
-            print_msg(msg)
+            if msg['type'] == "trajectory":
+                if msg['serial']==SERIAL_XY:
+                    resultXY = msg
+                if msg['serial']==SERIAL_XZ:
+                    resultXZ = msg
+        
+        t_start = max(resultXY.t_min, resultXZ.t_min)
+        t_end = min(resultXY.t_max, resultXZ.t_max)
+        
+
+            
     except KeyboardInterrupt:
         time.sleep(0.2)
 
