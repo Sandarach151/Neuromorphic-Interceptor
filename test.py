@@ -5,10 +5,17 @@ import multiprocessing as mp
 from datetime import datetime
 import signal
 from metavision_sdk_stream import Camera, CameraStreamSlicer, SliceCondition
+from turret import Turret
 
-TRIGGER_DELAY = 180000
-Y_CAM_XY = 115
-Z_CAM_XZ = 88
+TRIGGER_DELAY = 192_000 #increase if shot was late
+Y_CAM_XY = 114
+Z_CAM_XZ = 113
+Y_CAM_XZ = 17
+X_AC = 630
+Y_AC = 56
+Z_AC = 110 #decrease if shot was too much z
+V_AC = 9.4e-4
+X_PLANE = 730
 TAN_THETA_X_2 = 0.5726
 TAN_THETA_Y_2 = TAN_THETA_X_2 * 0.75
 
@@ -18,7 +25,6 @@ PIXEL_Y = 120
 BATCH_US = 10_000
 MAX_SENSOR_X = 640
 MAX_SENSOR_Y = 480
-G = 1.78e-10  # cm/us^2
 
 SERIAL_XY = "00001033"
 SERIAL_XZ = "00000768"
@@ -121,7 +127,7 @@ def camera_worker(serial, result_q, start_evt, stop_evt):
                     "file": filename
                 })
 
-                np.save(filename, arr)
+                #np.save(filename, arr)
 
             buffered_events = []
             continue
@@ -155,7 +161,7 @@ def pixel_to_ray_xy(x_pix, y_pix):
     return origin, dir
 
 def pixel_to_ray_xz(x_pix, y_pix):
-    origin = np.array([0, 0, Z_CAM_XZ])
+    origin = np.array([0, Y_CAM_XZ, Z_CAM_XZ])
     dir = np.array([(2*x_pix/MAX_SENSOR_X-1)*TAN_THETA_X_2, 1, (2*y_pix/MAX_SENSOR_Y-1)*TAN_THETA_Y_2])
     return origin, dir
 
@@ -203,6 +209,7 @@ if __name__ == "__main__":
 
     pxy = mp.Process(target=camera_worker, args=(SERIAL_XY, result_q, start_evt, stop_evt))
     pxz = mp.Process(target=camera_worker, args=(SERIAL_XZ, result_q, start_evt, stop_evt))
+    turret = Turret()
 
     print("Starting dual-camera capture in staggered processes...")
     pxy.start()
@@ -211,6 +218,7 @@ if __name__ == "__main__":
     time.sleep(1)
     print("Lifted capture barrier!")
     start_evt.set()
+    turret.sync(0, TRIGGER_DELAY)
 
     try:
         resultXY = None
@@ -244,6 +252,35 @@ if __name__ == "__main__":
             points.append([t_abs, mid[0], mid[1], mid[2]])
 
         points = np.asarray(points, dtype=np.float64)
+                
+        t = points[:, 0]
+        X = points[:, 1]
+        Y = points[:, 2]
+        Z = points[:, 3]
+
+        A_lin = np.vstack([t, np.ones_like(t)]).T
+
+        m_x, c_x = np.linalg.lstsq(A_lin, X, rcond=None)[0]  # X ≈ m_x t + c_x
+        m_z, c_z = np.linalg.lstsq(A_lin, Z, rcond=None)[0]  # Z ≈ m_z t + c_z
+
+        A_quad = np.vstack([t**2, t, np.ones_like(t)]).T  # shape (N, 3)
+        a_y, b_y, c_y = np.linalg.lstsq(A_quad, Y, rcond=None)[0]  # Y ≈ a_y t^2 + b_y t + c_y
+
+        t_hit = (X_PLANE - c_x) / m_x
+
+        y_hit = a_y * t_hit**2 + b_y * t_hit + c_y
+        z_hit = m_z * t_hit + c_z
+
+        y_delta = y_hit - Y_AC
+        z_delta = z_hit - Z_AC
+        yaw_angle = 90 - np.degrees(np.arctan(z_delta/(X_PLANE-X_AC)))
+        pitch_angle = 90 + np.degrees(np.arctan(y_delta/np.sqrt((X_PLANE-X_AC)**2 + z_delta**2))) 
+        t_fire = t_hit - np.sqrt(y_delta**2 + z_delta**2 + (X_PLANE-X_AC)**2) / V_AC
+        turret.fire(pitch_angle, yaw_angle, t_hit)
+        print(f"Intercept at x = {X_PLANE}:")
+        print(f"  t_hit = {t_hit}")
+        print(f"  y_hit = {y_hit}")
+        print(f"  z_hit = {z_hit}")
         out_name = "triangulated_midpoints.npy"
         np.save(out_name, points)
         print(f"Saved {points.shape[0]} 3D midpoints to {out_name}")

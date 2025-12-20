@@ -10,3 +10,4 @@
     - Accustrike (15.69 +- 0.34) m/s
     - Hole Bullet 15.74 m/s
     - Black Bullet 20.90 m/s
+9. sudo dmesg -w
