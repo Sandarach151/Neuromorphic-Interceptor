@@ -3,6 +3,7 @@ import time
 import numpy as np
 import multiprocessing as mp
 from datetime import datetime
+import signal
 from metavision_sdk_stream import Camera, CameraStreamSlicer, SliceCondition
 
 TRIGGER_DELAY = 180000
@@ -11,7 +12,7 @@ Z_CAM_XZ = 88
 TAN_THETA_X_2 = 0.5726
 TAN_THETA_Y_2 = TAN_THETA_X_2 * 0.75
 
-EVENT_THRESHOLD = 20
+EVENT_THRESHOLD = 10
 PIXEL_X = 160
 PIXEL_Y = 120
 BATCH_US = 10_000
@@ -57,8 +58,7 @@ def build_masks():
 
     return green_mask, red_mask
 
-def camera_worker(serial, result_q, stop_evt):
-    import signal
+def camera_worker(serial, result_q, start_evt, stop_evt):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     green_mask, red_mask = build_masks()
@@ -66,6 +66,8 @@ def camera_worker(serial, result_q, stop_evt):
     buffered_events = []
     cam = Camera.from_serial(serial)
     slicer = CameraStreamSlicer(cam.move(), SliceCondition.make_n_us(BATCH_US))
+
+    start_evt.wait()
 
     for sl in slicer:
         if stop_evt.is_set():
@@ -197,13 +199,18 @@ if __name__ == "__main__":
     mp.set_start_method("fork", force=True)
     result_q = mp.Queue()
     stop_evt = mp.Event()
+    start_evt = mp.Event()
 
-    pxy = mp.Process(target=camera_worker, args=(SERIAL_XY, result_q, stop_evt))
-    pxz = mp.Process(target=camera_worker, args=(SERIAL_XZ, result_q, stop_evt))
+    pxy = mp.Process(target=camera_worker, args=(SERIAL_XY, result_q, start_evt, stop_evt))
+    pxz = mp.Process(target=camera_worker, args=(SERIAL_XZ, result_q, start_evt, stop_evt))
 
-    print("Starting dual-camera capture in separate processes...")
+    print("Starting dual-camera capture in staggered processes...")
     pxy.start()
+    time.sleep(1)
     pxz.start()
+    time.sleep(1)
+    print("Lifted capture barrier!")
+    start_evt.set()
 
     try:
         resultXY = None
